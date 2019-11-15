@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import * as readline from 'readline';
+import { EventEmitter } from 'events';
 
 // All this mess is the best way I could find to get the realine to start
 // buffering the output of the spawned tail process immediately. Don't want
@@ -29,10 +30,17 @@ interface Options {
   args?: string[];
 }
 
-export const tail = <T extends unknown>(
-  fn: (lines: AsyncGenerator<string>) => Promise<T>,
-  { args }: Options = {},
-) => async (file: string): Promise<T> => {
+type WorkFn<T> = (
+  lines: AsyncGenerator<string>,
+  close: () => void,
+) => Promise<T>;
+
+type TailFn = <T extends unknown>(
+  fn: (lines: AsyncGenerator<string>, close: () => void) => Promise<T>,
+  opts?: Options,
+) => (file: string) => Promise<T>;
+
+export const tail: TailFn = (fn, { args }: Options = {}) => file => {
   return new Promise((resolve, reject) => {
     const tailProc = spawn('tail', [...(args || []), '-f', file]);
 
@@ -46,7 +54,8 @@ export const tail = <T extends unknown>(
       errMsg = '' + data;
     });
 
-    let result: T;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let result: any;
     let caughtErr: unknown;
     tailProc.on('close', async code => {
       if (caughtErr) {
@@ -64,7 +73,7 @@ export const tail = <T extends unknown>(
 
     const work = async () => {
       try {
-        result = await fn(bufferedGenerator(rl));
+        result = await fn(bufferedGenerator(rl), () => rl.close());
       } catch (e) {
         caughtErr = e;
       } finally {
@@ -73,4 +82,38 @@ export const tail = <T extends unknown>(
     };
     work();
   });
+};
+
+export interface Tailer {
+  close: () => void;
+  tail: TailFn;
+}
+
+export const makeTailer = () => {
+  let closeCallbacks: (() => void)[] = [];
+  let closed = false;
+
+  const close = () => {
+    closed = true;
+    closeCallbacks.forEach(cb => cb());
+  };
+
+  const boundTail: TailFn = (fn, opts) => async file => {
+    let myClose: () => void;
+    try {
+      const result = await tail((lines, doClose) => {
+        if (closed) {
+          throw Error('Tailer has been closed');
+        }
+        myClose = () => doClose();
+        closeCallbacks.push(myClose);
+        return fn(lines, doClose);
+      }, opts)(file);
+      return result;
+    } finally {
+      closeCallbacks = closeCallbacks.filter(item => item != myClose);
+    }
+  };
+
+  return { tail: boundTail, close, activeTails: () => closeCallbacks.length };
 };

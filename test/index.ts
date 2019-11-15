@@ -2,13 +2,13 @@
 
 import 'mocha';
 import * as fs from 'fs';
-import { tail } from '../src';
+import { makeTailer, Tailer, tail } from '../src';
 import { assert } from 'chai';
 
 const appendFile = __dirname + '/../../test/tmp/append-file.txt';
 
 suite('tail', () => {
-  test('basic test', async () => {
+  test('Basic test', async () => {
     const output = await tail(
       async lines => {
         const collected: string[] = [];
@@ -23,7 +23,7 @@ suite('tail', () => {
     assert.deepEqual(output, ['1', '2', '3', '4']);
   });
 
-  test('non existent file', async () => {
+  test('Non existent file', async () => {
     let errObj: { code?: number } = {};
     try {
       await tail(
@@ -40,7 +40,7 @@ suite('tail', () => {
     assert.equal(errObj.code, 1);
   });
 
-  test('nothing missed -- buffered until iteration begins', async () => {
+  test('Nothing missed -- buffered until iteration begins', async () => {
     const input = ['a', 'b', 'c'];
     const output: string[] = [];
     fs.closeSync(fs.openSync(appendFile, 'w'));
@@ -72,5 +72,67 @@ suite('tail', () => {
     }
 
     assert.fail('Expected exception');
+  });
+});
+
+suite('tailer', () => {
+  test('Calling close interrupts the tail', async () => {
+    const tailer = makeTailer();
+    const tailing = tailer.tail(
+      async lines => {
+        const collected: string[] = [];
+        for await (const line of lines) {
+          collected.push(line);
+
+          // Never happens
+          if (line === '5') break;
+        }
+        return collected;
+      },
+      { args: ['-n4'] },
+    )(__dirname + '/../../test/test-file.txt');
+
+    // delay a bit
+    await new Promise(r => setTimeout(r, 10));
+
+    assert.equal(tailer.activeTails(), 1);
+
+    tailer.close();
+
+    const output = await tailing;
+    assert.deepEqual(output, ['1', '2', '3', '4']);
+  });
+
+  test("Don't need to call close", async () => {
+    const tailer = makeTailer();
+    const output = await tailer.tail(
+      async lines => {
+        const collected: string[] = [];
+        for await (const line of lines) {
+          collected.push(line);
+          if (line === '4') break;
+        }
+        return collected;
+      },
+      { args: ['-n4'] },
+    )(__dirname + '/../../test/test-file.txt');
+
+    assert.equal(tailer.activeTails(), 0);
+    assert.deepEqual(output, ['1', '2', '3', '4']);
+  });
+
+  test("Closed tailer can't be used", async () => {
+    let errMsg = '';
+
+    const tailer = makeTailer();
+    tailer.close();
+
+    try {
+      await tailer.tail(async () => {})('');
+    } catch (e) {
+      errMsg = e.message;
+    }
+
+    assert.match(errMsg, /closed/i);
   });
 });
