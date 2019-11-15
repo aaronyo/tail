@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    /* Basic Options */
+    "target": "es5",
+    "module": "commonjs",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "out",
+    "baseUrl": ".",
+    "declaration": true,
+  },
+  "include": ["src/*", "test/*"]
+}

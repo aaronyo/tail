@@ -1,0 +1,30 @@
+{
+  "name": "tools",
+  "version": "0.0.1",
+  "description": "Tools useful for bublup-connect",
+  "private": true,
+  "main": "out/src/index.js",
+  "scripts": {
+    "build-ts": "tsc -d",
+    "test": "yarn run build-ts && mocha --ui tdd out/test"
+  },
+  "dependencies": {
+    "lodash": "^4.17.15",
+    "module-alias": "^2.2.2",
+    "readline": "^1.3.0"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.2.5",
+    "@types/mocha": "^5.2.7",
+    "@types/node": "^12.12.7",
+    "@typescript-eslint/eslint-plugin": "^2.6.1",
+    "@typescript-eslint/parser": "^2.6.1",
+    "chai": "^4.2.0",
+    "eslint": "^6.6.0",
+    "eslint-plugin-import": "^2.18.2",
+    "eslint-plugin-node": "^10.0.0",
+    "mocha": "^6.2.2",
+    "prettier": "prettier/prettier",
+    "typescript": "^3.7.2"
+  }
+}
