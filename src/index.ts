@@ -42,21 +42,31 @@ export const tail = <T extends unknown>(
     rl.on('close', () => tailProc.kill());
 
     let errMsg = '';
-    let result: T;
     tailProc.stderr.on('data', data => {
       errMsg = '' + data;
     });
 
-    tailProc.on('close', code => {
+    let result: T;
+    let caughtErr: unknown;
+    tailProc.on('close', async code => {
+      if (caughtErr) {
+        reject(caughtErr);
+        return;
+      }
+
       if (code === 0 || code === null) {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         resolve(result);
+        return;
       }
       reject(new Error(JSON.stringify({ code, msg: errMsg })));
     });
 
-    const work = async (): Promise<void> => {
+    const work = async () => {
       try {
         result = await fn(bufferedGenerator(rl));
+      } catch (e) {
+        caughtErr = e;
       } finally {
         rl.close();
       }
