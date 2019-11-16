@@ -1,32 +1,6 @@
 import { spawn } from 'child_process';
 import * as readline from 'readline';
 
-// All this mess is the best way I could find to get the realine to start
-// buffering the output of the spawned tail process immediately. Don't want
-// to lose any
-
-const bufferedGenerator = (rl: readline.ReadLine): AsyncGenerator<string> => {
-  async function* rlGen(): AsyncGenerator<string> {
-    for await (const l of rl) {
-      yield l;
-    }
-  }
-  const rlIter = rlGen();
-  const first = rlIter.next();
-  async function* bufferedGen(): AsyncGenerator<string> {
-    const firstItem = await first;
-    if (firstItem.done) return;
-    try {
-      yield firstItem.value;
-      yield* rlIter;
-    } finally {
-      rl.close();
-    }
-  }
-
-  return bufferedGen();
-};
-
 interface Options {
   args?: string[];
 }
@@ -48,11 +22,9 @@ export const tail: TailFn = (opts = {}) => file => {
     errMsg = '' + data;
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onClosed = new Promise((resolve, reject) => {
     tailProc.on('close', async code => {
       if (code === 0 || code === null) {
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         resolve();
         return;
       }
@@ -60,13 +32,20 @@ export const tail: TailFn = (opts = {}) => file => {
     });
   });
 
+  // All this mess is the best way I could find to get the readline to start
+  // buffering the output of the spawned tail process immediately. Don't want
+  // to lose any
+
   async function* rlGen(): AsyncGenerator<string> {
     for await (const l of rl) {
       yield l;
     }
   }
   const rlIter = rlGen();
+
+  // start pulling on readline; which will start buffering the tail stdout
   const first = rlIter.next();
+
   async function* bufferedGen(): AsyncGenerator<string> {
     const firstItem = await first;
     if (!firstItem.done) {
