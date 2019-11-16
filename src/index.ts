@@ -107,6 +107,7 @@ export const withTail: WithTailFn = (fn, opts) => async file => {
 export interface Tailer {
   close: () => void;
   tail: TailFn;
+  withTail: WithTailFn;
 }
 
 export const makeTailer = () => {
