@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { makeTailer, withTail, tail } from '../src';
 import { assert } from 'chai';
 
+const testFile = __dirname + '/../../test/test-file.txt';
 const appendFile = __dirname + '/../../test/tmp/append-file.txt';
 
 suite('tail', () => {
@@ -16,6 +17,19 @@ suite('tail', () => {
     for await (const line of lines) {
       collected.push(line);
       if (line === '4') break;
+    }
+    assert.deepEqual(collected, ['1', '2', '3', '4']);
+  });
+
+  test('Close interrupts tail', async () => {
+    const collected: string[] = [];
+    const { lines, close } = tail({ args: ['-n4'] })(testFile);
+
+    setTimeout(close, 50);
+
+    for await (const line of lines) {
+      collected.push(line);
+      if (line === '5') break;
     }
     assert.deepEqual(collected, ['1', '2', '3', '4']);
   });
@@ -33,7 +47,7 @@ suite('withTail', () => {
         return collected;
       },
       { args: ['-n4'] },
-    )(__dirname + '/../../test/test-file.txt');
+    )(testFile);
     assert.deepEqual(output, ['1', '2', '3', '4']);
   });
 
@@ -104,7 +118,7 @@ suite('tailer', () => {
         return collected;
       },
       { args: ['-n4'] },
-    )(__dirname + '/../../test/test-file.txt');
+    )(testFile);
 
     // delay a bit
     await new Promise(r => setTimeout(r, 10));
@@ -129,7 +143,7 @@ suite('tailer', () => {
         return collected;
       },
       { args: ['-n4'] },
-    )(__dirname + '/../../test/test-file.txt');
+    )(testFile);
 
     assert.equal(tailer.activeTails(), 0);
     assert.deepEqual(output, ['1', '2', '3', '4']);
