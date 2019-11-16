@@ -1,6 +1,6 @@
 {
   "name": "@aaronyo/tail",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Tail lines from a file with automatic resource cleanup.",
   "author": "Aaron Boyd",
   "license": "MIT",
