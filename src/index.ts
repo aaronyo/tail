@@ -1,14 +1,11 @@
 import { spawn } from 'child_process';
 import * as readline from 'readline';
-import { EventEmitter } from 'events';
 
 // All this mess is the best way I could find to get the realine to start
 // buffering the output of the spawned tail process immediately. Don't want
 // to lose any
 
-const bufferedGenerator = (
-  rl: AsyncIterable<string>,
-): AsyncGenerator<string> => {
+const bufferedGenerator = (rl: readline.ReadLine): AsyncGenerator<string> => {
   async function* rlGen(): AsyncGenerator<string> {
     for await (const l of rl) {
       yield l;
@@ -19,8 +16,12 @@ const bufferedGenerator = (
   async function* bufferedGen(): AsyncGenerator<string> {
     const firstItem = await first;
     if (firstItem.done) return;
-    yield firstItem.value;
-    yield* rlIter;
+    try {
+      yield firstItem.value;
+      yield* rlIter;
+    } finally {
+      rl.close();
+    }
   }
 
   return bufferedGen();
@@ -30,58 +31,77 @@ interface Options {
   args?: string[];
 }
 
-type WorkFn<T> = (
-  lines: AsyncGenerator<string>,
-  close: () => void,
-) => Promise<T>;
-
-type TailFn = <T extends unknown>(
-  fn: (lines: AsyncGenerator<string>, close: () => void) => Promise<T>,
+type TailFn = (
   opts?: Options,
-) => (file: string) => Promise<T>;
+) => (file: string) => { lines: AsyncGenerator<string>; close: () => void };
 
-export const tail: TailFn = (fn, { args }: Options = {}) => file => {
-  return new Promise((resolve, reject) => {
-    const tailProc = spawn('tail', [...(args || []), '-f', file]);
+export const tail: TailFn = (opts = {}) => file => {
+  const tailProc = spawn('tail', [...(opts.args || []), '-f', file]);
 
-    const rl = readline.createInterface({
-      input: tailProc.stdout,
-    });
-    rl.on('close', () => tailProc.kill());
+  const rl = readline.createInterface({
+    input: tailProc.stdout,
+  });
+  rl.on('close', () => tailProc.kill());
 
-    let errMsg = '';
-    tailProc.stderr.on('data', data => {
-      errMsg = '' + data;
-    });
+  let errMsg = '';
+  tailProc.stderr.on('data', data => {
+    errMsg = '' + data;
+  });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let result: any;
-    let caughtErr: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const onClosed = new Promise((resolve, reject) => {
     tailProc.on('close', async code => {
-      if (caughtErr) {
-        reject(caughtErr);
-        return;
-      }
-
       if (code === 0 || code === null) {
         // eslint-disable-next-line @typescript-eslint/no-use-before-define
-        resolve(result);
+        resolve();
         return;
       }
       reject(new Error(JSON.stringify({ code, msg: errMsg })));
     });
+  });
 
-    const work = async () => {
+  async function* rlGen(): AsyncGenerator<string> {
+    for await (const l of rl) {
+      yield l;
+    }
+  }
+  const rlIter = rlGen();
+  const first = rlIter.next();
+  async function* bufferedGen(): AsyncGenerator<string> {
+    const firstItem = await first;
+    if (!firstItem.done) {
       try {
-        result = await fn(bufferedGenerator(rl), () => rl.close());
-      } catch (e) {
-        caughtErr = e;
+        yield firstItem.value;
+        yield* rlIter;
       } finally {
         rl.close();
       }
-    };
-    work();
-  });
+    }
+    return await onClosed;
+  }
+
+  return {
+    lines: bufferedGen(),
+    close: () => rl.close(),
+  };
+};
+
+type WithTailFn = <T extends unknown>(
+  fn: (lines: AsyncGenerator<string>, close: () => void) => Promise<T>,
+  opts?: Options,
+) => (file: string) => Promise<T>;
+
+export const withTail: WithTailFn = (fn, opts) => async file => {
+  const { lines, close } = tail(opts)(file);
+
+  const work = async () => {
+    try {
+      return await fn(lines, close);
+    } finally {
+      close();
+    }
+  };
+  return work();
 };
 
 export interface Tailer {
@@ -98,22 +118,36 @@ export const makeTailer = () => {
     closeCallbacks.forEach(cb => cb());
   };
 
-  const boundTail: TailFn = (fn, opts) => async file => {
-    let myClose: () => void;
-    try {
-      const result = await tail((lines, doClose) => {
-        if (closed) {
-          throw Error('Tailer has been closed');
-        }
-        myClose = () => doClose();
-        closeCallbacks.push(myClose);
-        return fn(lines, doClose);
-      }, opts)(file);
-      return result;
-    } finally {
-      closeCallbacks = closeCallbacks.filter(item => item != myClose);
-    }
+  const boundTail: TailFn = opts => file => {
+    if (closed) throw new Error('Tailer has been closed');
+    const { lines, close: tailClose } = tail(opts)(file);
+    closeCallbacks.push(tailClose);
+    return {
+      lines,
+      close: () => {
+        closeCallbacks = closeCallbacks.filter(cb => cb != tailClose);
+      },
+    };
   };
 
-  return { tail: boundTail, close, activeTails: () => closeCallbacks.length };
+  const boundWithTail: WithTailFn = (fn, opts) => async file => {
+    if (closed) throw new Error('Tailer has been closed');
+    const { lines, close } = boundTail(opts)(file);
+
+    const work = async () => {
+      try {
+        return await fn(lines, close);
+      } finally {
+        close();
+      }
+    };
+    return work();
+  };
+
+  return {
+    tail: boundTail,
+    withTail: boundWithTail,
+    close,
+    activeTails: () => closeCallbacks.length,
+  };
 };
