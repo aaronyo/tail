@@ -9,7 +9,7 @@
   "scripts": {
     "clean": "rm -rf out",
     "build-ts": "tsc -d",
-    "test": "yarn run build-ts && mocha --ui tdd out/test",
+    "test": "yarn run build-ts && mocha --ui tdd out/test $@",
     "prepublish": "yarn run build-ts && yarn test"
   },
   "dependencies": {
